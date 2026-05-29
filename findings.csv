@@ -1,0 +1,379 @@
+severity,issue_title,rule_id,cwe,priority_score,file,line,message,source,sink,data_flow,remediation,autofixable,fingerprint
+High,Cross-Site Request Forgery (CSRF),java/DisablesCSRFProtection,CWE-352,757,src/main/java/org/workshop/aiconferencebooking/config/SecurityConfig.java,51,CSRF protection is disabled by ignoringRequestMatchers. This allows the attackers to execute requests on a user's behalf.,"src/main/java/org/workshop/aiconferencebooking/config/SecurityConfig.java:52  |  csrf.ignoringRequestMatchers(new AntPathRequestMatcher(""/h2-console/**""))","src/main/java/org/workshop/aiconferencebooking/config/SecurityConfig.java:52  |  csrf.ignoringRequestMatchers(new AntPathRequestMatcher(""/h2-console/**""))","1. L52  |  csrf.ignoringRequestMatchers(new AntPathRequestMatcher(""/h2-console/**""))","## Details
+Cross-site request forgery is an attack in which a malicious third party takes advantage of a user's authenticated credentials (such as a browser cookie) to impersonate that trusted user and perform unauthorized actions. The web application server cannot tell the difference between legitimate and malicious requests. This type of attack generally begins by tricking the user with a social engineering attack, such as a link or popup that the user inadvertently clicks, causing an unauthorized request to be sent to the web server. Consequences vary: At a standard user level, attackers can change passwords, transfer funds, make purchases, or connect with contacts; from an administrator account, attackers can then make changes to or even take down the app itself.
+
+## Best practices for prevention
+* Use development frameworks that defend against CSRF, using a nonce, hash, or some other security device to the URL and/or to forms.
+* Implement secure, unique, hidden tokens that are checked by the server each time to validate state-change requests.
+* Never assume that authentication tokens and session identifiers mean a request is legitimate.
+* Understand and implement other safe-cookie techniques, such as double submit cookies.
+* Terminate user sessions when not in use, including automatic timeout.
+* Ensure rigorous coding practices and defenses against other commonly exploited CWEs, since cross-site scripting (XSS), for example, can be used to bypass defenses against CSRF.",True,01e627bd-7420-412c-b210-041313558393
+High,Path Traversal,java/PT,CWE-23,854,src/main/java/org/workshop/aiconferencebooking/controller/DownloadController.java,33,"Unsanitized input from an HTTP parameter flows into java.nio.file.Files.write, where it is used as a path. This may result in a Path Traversal vulnerability and allow an attacker to write to arbitrary files.","src/main/java/org/workshop/aiconferencebooking/controller/DownloadController.java:25  |  public String uploadImage(Model model, @RequestParam(""image"") MultipartFile file,Principal principal) throws IOException {","src/main/java/org/workshop/aiconferencebooking/controller/DownloadController.java:33  |  Files.write(path, file.getBytes());","1. L25  |  public String uploadImage(Model model, @RequestParam(""image"") MultipartFile file,Principal principal) throws IOException {
+2. L27  |  var name = file.getOriginalFilename();
+3. L29  |  var path = Paths.get(UPLOAD_DIRECTORY + File.separator + name);
+4. L33  |  Files.write(path, file.getBytes());","## Details
+
+A Directory Traversal attack (also known as path traversal) aims to access files and directories that are stored outside the intended folder. By manipulating files with ""dot-dot-slash (../)"" sequences and its variations, or by using absolute file paths, it may be possible to access arbitrary files and directories stored on file system, including application source code, configuration, and other critical system files.
+
+Being able to access and manipulate an arbitrary path leads to vulnerabilities when a program is being run with privileges that the user providing the path should not have. A website with a path traversal vulnerability would allow users access to sensitive files on the server hosting it. CLI programs may also be vulnerable to path traversal if they are being ran with elevated privileges (such as with the setuid or setgid flags in Unix systems).
+
+Directory Traversal vulnerabilities can be generally divided into two types:
+
+- **Information Disclosure**: Allows the attacker to gain information about the folder structure or read the contents of sensitive files on the system.
+
+`st` is a module for serving static files on web pages, and contains a [vulnerability of this type](https://snyk.io/vuln/npm:st:20140206). In our example, we will serve files from the `public` route.
+
+If an attacker requests the following URL from our server, it will in turn leak the sensitive private key of the root user.
+
+```
+curl http://localhost:8080/public/%2e%2e/%2e%2e/%2e%2e/%2e%2e/%2e%2e/root/.ssh/id_rsa
+```
+**Note** `%2e` is the URL encoded version of `.` (dot).
+
+- **Writing arbitrary files**: Allows the attacker to create or replace existing files. This type of vulnerability is also known as `Zip-Slip`.
+
+One way to achieve this is by using a malicious `zip` archive that holds path traversal filenames. When each filename in the zip archive gets concatenated to the target extraction folder, without validation, the final path ends up outside of the target folder. If an executable or a configuration file is overwritten with a file containing malicious code, the problem can turn into an arbitrary code execution issue quite easily.
+
+The following is an example of a `zip` archive with one benign file and one malicious file. Extracting the malicious file will result in traversing out of the target folder, ending up in `/root/.ssh/` overwriting the `authorized_keys` file:
+
+```
+2018-04-15 22:04:29 .....           19           19  good.txt
+2018-04-15 22:04:42 .....           20           20  ../../../../../../root/.ssh/authorized_keys
+```",True,e68e4526-a4bd-4ad5-88be-2485ec897f49
+High,Path Traversal,java/PT,CWE-23,854,src/main/java/org/workshop/aiconferencebooking/controller/DownloadController.java,57,"Unsanitized input from an HTTP parameter flows into java.nio.file.Files.write, where it is used as a path. This may result in a Path Traversal vulnerability and allow an attacker to write to arbitrary files.","src/main/java/org/workshop/aiconferencebooking/controller/DownloadController.java:50  |  public String uploadImag3(Model model, @RequestParam(""image"") MultipartFile file,Principal principal) throws IOException {","src/main/java/org/workshop/aiconferencebooking/controller/DownloadController.java:57  |  Files.write(path, file.getBytes());","1. L50  |  public String uploadImag3(Model model, @RequestParam(""image"") MultipartFile file,Principal principal) throws IOException {
+2. L52  |  var name = file.getOriginalFilename();
+3. L54  |  var path = Paths.get(UPLOAD_DIRECTORY + File.separator + name);
+4. L57  |  Files.write(path, file.getBytes());","## Details
+
+A Directory Traversal attack (also known as path traversal) aims to access files and directories that are stored outside the intended folder. By manipulating files with ""dot-dot-slash (../)"" sequences and its variations, or by using absolute file paths, it may be possible to access arbitrary files and directories stored on file system, including application source code, configuration, and other critical system files.
+
+Being able to access and manipulate an arbitrary path leads to vulnerabilities when a program is being run with privileges that the user providing the path should not have. A website with a path traversal vulnerability would allow users access to sensitive files on the server hosting it. CLI programs may also be vulnerable to path traversal if they are being ran with elevated privileges (such as with the setuid or setgid flags in Unix systems).
+
+Directory Traversal vulnerabilities can be generally divided into two types:
+
+- **Information Disclosure**: Allows the attacker to gain information about the folder structure or read the contents of sensitive files on the system.
+
+`st` is a module for serving static files on web pages, and contains a [vulnerability of this type](https://snyk.io/vuln/npm:st:20140206). In our example, we will serve files from the `public` route.
+
+If an attacker requests the following URL from our server, it will in turn leak the sensitive private key of the root user.
+
+```
+curl http://localhost:8080/public/%2e%2e/%2e%2e/%2e%2e/%2e%2e/%2e%2e/root/.ssh/id_rsa
+```
+**Note** `%2e` is the URL encoded version of `.` (dot).
+
+- **Writing arbitrary files**: Allows the attacker to create or replace existing files. This type of vulnerability is also known as `Zip-Slip`.
+
+One way to achieve this is by using a malicious `zip` archive that holds path traversal filenames. When each filename in the zip archive gets concatenated to the target extraction folder, without validation, the final path ends up outside of the target folder. If an executable or a configuration file is overwritten with a file containing malicious code, the problem can turn into an arbitrary code execution issue quite easily.
+
+The following is an example of a `zip` archive with one benign file and one malicious file. Extracting the malicious file will result in traversing out of the target folder, ending up in `/root/.ssh/` overwriting the `authorized_keys` file:
+
+```
+2018-04-15 22:04:29 .....           19           19  good.txt
+2018-04-15 22:04:42 .....           20           20  ../../../../../../root/.ssh/authorized_keys
+```",True,c09ba315-aa59-4a30-914b-2e5102c5cc0f
+High,SQL Injection,java/Sqli,CWE-89,770,src/main/java/org/workshop/aiconferencebooking/controller/HomeController.java,53,"Unsanitized input from an HTTP parameter flows into createNativeQuery, where it is used in an SQL query. This may result in an SQL Injection vulnerability.","src/main/java/org/workshop/aiconferencebooking/controller/HomeController.java:41  |  public String searchTalks(Model model, @RequestParam String input) {","src/main/java/org/workshop/aiconferencebooking/controller/HomeController.java:53  |  Query query = em.createNativeQuery(""select * from Talk t where lower(description) like '%"" + lowerInput + ""%' OR lower(title) like '%"" + lowerInput + ""%'"", Talk.class);","1. L41  |  public String searchTalks(Model model, @RequestParam String input) {
+2. L45  |  model.addAttribute(""talks"", searchTalk(input));
+3. L50  |  public List<Talk> searchTalk(String input) {
+4. L52  |  var lowerInput = input.toLowerCase();
+5. L53  |  Query query = em.createNativeQuery(""select * from Talk t where lower(description) like '%"" + lowerInput + ""%' OR lower(title) like '%"" + lowerInput + ""%'"", Talk.class);","## Details
+
+In an SQL injection attack, the user can submit an SQL query directly to the database, gaining access without providing appropriate credentials. Attackers can then view, export, modify, and delete confidential information; change passwords and other authentication information; and possibly gain access to other systems within the network. This is one of the most commonly exploited categories of vulnerability, but can largely be avoided through good coding practices.
+
+## Best practices for prevention
+* Avoid passing user-entered parameters directly to the SQL server.
+* Avoid using string concatenation to build SQL queries from user-entered parameters.
+* When coding, define SQL code first, then pass in parameters. Use prepared statements with parameterized queries. Examples include `SqlCommand()` in .NET and `bindParam()` in PHP.
+* Use strong typing for all parameters so unexpected user data will be rejected.
+* Where direct user input cannot be avoided for performance reasons, validate input against a very strict allowlist of permitted characters, avoiding special characters such as `? & / < > ; - ' "" \` and spaces. Use a vendor-supplied escaping routine if possible.
+* Develop your application in an environment and/or using libraries that provide protection against SQL injection.
+* Harden your entire environment around a least-privilege model, ideally with isolated accounts with privileges only for particular tasks.",True,3c38fde2-aa8b-47c1-9f43-4d10365938a4
+High,SQL Injection,java/Sqli,CWE-89,770,src/main/java/org/workshop/aiconferencebooking/controller/LogoutController.java,54,"Unsanitized input from an HTTP parameter flows into createNativeQuery, where it is used in an SQL query. This may result in an SQL Injection vulnerability.","src/main/java/org/workshop/aiconferencebooking/controller/LogoutController.java:41  |  public String searchTalks(Model model, @RequestParam String input) {","src/main/java/org/workshop/aiconferencebooking/controller/LogoutController.java:54  |  var query = em.createNativeQuery(""select * from Talk t where lower(description) like '%"" + lowerInput + ""%' OR lower(title) like '%"" + lowerInput + ""%'"", Talk.class);","1. L41  |  public String searchTalks(Model model, @RequestParam String input) {
+2. L45  |  model.addAttribute(""talks"", searchTalk(input));
+3. L50  |  public List<Talk> searchTalk(String input) {
+4. L52  |  var lowerInput = input.toLowerCase();
+5. L54  |  var query = em.createNativeQuery(""select * from Talk t where lower(description) like '%"" + lowerInput + ""%' OR lower(title) like '%"" + lowerInput + ""%'"", Talk.class);","## Details
+
+In an SQL injection attack, the user can submit an SQL query directly to the database, gaining access without providing appropriate credentials. Attackers can then view, export, modify, and delete confidential information; change passwords and other authentication information; and possibly gain access to other systems within the network. This is one of the most commonly exploited categories of vulnerability, but can largely be avoided through good coding practices.
+
+## Best practices for prevention
+* Avoid passing user-entered parameters directly to the SQL server.
+* Avoid using string concatenation to build SQL queries from user-entered parameters.
+* When coding, define SQL code first, then pass in parameters. Use prepared statements with parameterized queries. Examples include `SqlCommand()` in .NET and `bindParam()` in PHP.
+* Use strong typing for all parameters so unexpected user data will be rejected.
+* Where direct user input cannot be avoided for performance reasons, validate input against a very strict allowlist of permitted characters, avoiding special characters such as `? & / < > ; - ' "" \` and spaces. Use a vendor-supplied escaping routine if possible.
+* Develop your application in an environment and/or using libraries that provide protection against SQL injection.
+* Harden your entire environment around a least-privilege model, ideally with isolated accounts with privileges only for particular tasks.",True,c8584218-3ac6-4ddb-9432-322cb970dd4d
+High,Path Traversal,java/PT,CWE-23,854,src/main/java/org/workshop/aiconferencebooking/controller/MyUpload.java,41,"Unsanitized input from an HTTP parameter flows into java.nio.file.Files.write, where it is used as a path. This may result in a Path Traversal vulnerability and allow an attacker to write to arbitrary files.","src/main/java/org/workshop/aiconferencebooking/controller/MyUpload.java:35  |  public String uploadV1(Model model, @RequestParam(""image"") MultipartFile file, Principal principal) throws IOException {","src/main/java/org/workshop/aiconferencebooking/controller/MyUpload.java:41  |  Files.write(path, file.getBytes());","1. L35  |  public String uploadV1(Model model, @RequestParam(""image"") MultipartFile file, Principal principal) throws IOException {
+2. L37  |  var name = file.getOriginalFilename();
+3. L39  |  var path = Paths.get(UPLOAD_DIRECTORY + File.separator + name);
+4. L41  |  Files.write(path, file.getBytes());","## Details
+
+A Directory Traversal attack (also known as path traversal) aims to access files and directories that are stored outside the intended folder. By manipulating files with ""dot-dot-slash (../)"" sequences and its variations, or by using absolute file paths, it may be possible to access arbitrary files and directories stored on file system, including application source code, configuration, and other critical system files.
+
+Being able to access and manipulate an arbitrary path leads to vulnerabilities when a program is being run with privileges that the user providing the path should not have. A website with a path traversal vulnerability would allow users access to sensitive files on the server hosting it. CLI programs may also be vulnerable to path traversal if they are being ran with elevated privileges (such as with the setuid or setgid flags in Unix systems).
+
+Directory Traversal vulnerabilities can be generally divided into two types:
+
+- **Information Disclosure**: Allows the attacker to gain information about the folder structure or read the contents of sensitive files on the system.
+
+`st` is a module for serving static files on web pages, and contains a [vulnerability of this type](https://snyk.io/vuln/npm:st:20140206). In our example, we will serve files from the `public` route.
+
+If an attacker requests the following URL from our server, it will in turn leak the sensitive private key of the root user.
+
+```
+curl http://localhost:8080/public/%2e%2e/%2e%2e/%2e%2e/%2e%2e/%2e%2e/root/.ssh/id_rsa
+```
+**Note** `%2e` is the URL encoded version of `.` (dot).
+
+- **Writing arbitrary files**: Allows the attacker to create or replace existing files. This type of vulnerability is also known as `Zip-Slip`.
+
+One way to achieve this is by using a malicious `zip` archive that holds path traversal filenames. When each filename in the zip archive gets concatenated to the target extraction folder, without validation, the final path ends up outside of the target folder. If an executable or a configuration file is overwritten with a file containing malicious code, the problem can turn into an arbitrary code execution issue quite easily.
+
+The following is an example of a `zip` archive with one benign file and one malicious file. Extracting the malicious file will result in traversing out of the target folder, ending up in `/root/.ssh/` overwriting the `authorized_keys` file:
+
+```
+2018-04-15 22:04:29 .....           19           19  good.txt
+2018-04-15 22:04:42 .....           20           20  ../../../../../../root/.ssh/authorized_keys
+```",True,05140135-63f2-40ba-9a82-d9e1d060e430
+High,Path Traversal,java/PT,CWE-23,854,src/main/java/org/workshop/aiconferencebooking/controller/MyUpload.java,56,"Unsanitized input from an HTTP parameter flows into java.nio.file.Files.write, where it is used as a path. This may result in a Path Traversal vulnerability and allow an attacker to write to arbitrary files.","src/main/java/org/workshop/aiconferencebooking/controller/MyUpload.java:52  |  @RequestParam(""filename"") String filename, Principal principal) throws IOException {","src/main/java/org/workshop/aiconferencebooking/controller/MyUpload.java:56  |  Files.write(path, file.getBytes());","1. L52  |  @RequestParam(""filename"") String filename, Principal principal) throws IOException {
+2. L54  |  var path = Paths.get(UPLOAD_DIRECTORY + File.separator + filename);
+3. L56  |  Files.write(path, file.getBytes());","## Details
+
+A Directory Traversal attack (also known as path traversal) aims to access files and directories that are stored outside the intended folder. By manipulating files with ""dot-dot-slash (../)"" sequences and its variations, or by using absolute file paths, it may be possible to access arbitrary files and directories stored on file system, including application source code, configuration, and other critical system files.
+
+Being able to access and manipulate an arbitrary path leads to vulnerabilities when a program is being run with privileges that the user providing the path should not have. A website with a path traversal vulnerability would allow users access to sensitive files on the server hosting it. CLI programs may also be vulnerable to path traversal if they are being ran with elevated privileges (such as with the setuid or setgid flags in Unix systems).
+
+Directory Traversal vulnerabilities can be generally divided into two types:
+
+- **Information Disclosure**: Allows the attacker to gain information about the folder structure or read the contents of sensitive files on the system.
+
+`st` is a module for serving static files on web pages, and contains a [vulnerability of this type](https://snyk.io/vuln/npm:st:20140206). In our example, we will serve files from the `public` route.
+
+If an attacker requests the following URL from our server, it will in turn leak the sensitive private key of the root user.
+
+```
+curl http://localhost:8080/public/%2e%2e/%2e%2e/%2e%2e/%2e%2e/%2e%2e/root/.ssh/id_rsa
+```
+**Note** `%2e` is the URL encoded version of `.` (dot).
+
+- **Writing arbitrary files**: Allows the attacker to create or replace existing files. This type of vulnerability is also known as `Zip-Slip`.
+
+One way to achieve this is by using a malicious `zip` archive that holds path traversal filenames. When each filename in the zip archive gets concatenated to the target extraction folder, without validation, the final path ends up outside of the target folder. If an executable or a configuration file is overwritten with a file containing malicious code, the problem can turn into an arbitrary code execution issue quite easily.
+
+The following is an example of a `zip` archive with one benign file and one malicious file. Extracting the malicious file will result in traversing out of the target folder, ending up in `/root/.ssh/` overwriting the `authorized_keys` file:
+
+```
+2018-04-15 22:04:29 .....           19           19  good.txt
+2018-04-15 22:04:42 .....           20           20  ../../../../../../root/.ssh/authorized_keys
+```",True,68547d8b-202a-46b6-bdb8-dbb5816daf91
+High,Path Traversal,java/PT,CWE-23,854,src/main/java/org/workshop/aiconferencebooking/controller/MyUpload.java,73,"Unsanitized input from the request URL flows into java.nio.file.Files.write, where it is used as a path. This may result in a Path Traversal vulnerability and allow an attacker to write to arbitrary files.","src/main/java/org/workshop/aiconferencebooking/controller/MyUpload.java:67  |  @PathVariable(""dir"") String dir, Principal principal) throws IOException {","src/main/java/org/workshop/aiconferencebooking/controller/MyUpload.java:73  |  Files.write(path, file.getBytes());","1. L67  |  @PathVariable(""dir"") String dir, Principal principal) throws IOException {
+2. L71  |  var path = Paths.get(UPLOAD_DIRECTORY + File.separator + dir + File.separator + name);
+3. L73  |  Files.write(path, file.getBytes());","## Details
+
+A Directory Traversal attack (also known as path traversal) aims to access files and directories that are stored outside the intended folder. By manipulating files with ""dot-dot-slash (../)"" sequences and its variations, or by using absolute file paths, it may be possible to access arbitrary files and directories stored on file system, including application source code, configuration, and other critical system files.
+
+Being able to access and manipulate an arbitrary path leads to vulnerabilities when a program is being run with privileges that the user providing the path should not have. A website with a path traversal vulnerability would allow users access to sensitive files on the server hosting it. CLI programs may also be vulnerable to path traversal if they are being ran with elevated privileges (such as with the setuid or setgid flags in Unix systems).
+
+Directory Traversal vulnerabilities can be generally divided into two types:
+
+- **Information Disclosure**: Allows the attacker to gain information about the folder structure or read the contents of sensitive files on the system.
+
+`st` is a module for serving static files on web pages, and contains a [vulnerability of this type](https://snyk.io/vuln/npm:st:20140206). In our example, we will serve files from the `public` route.
+
+If an attacker requests the following URL from our server, it will in turn leak the sensitive private key of the root user.
+
+```
+curl http://localhost:8080/public/%2e%2e/%2e%2e/%2e%2e/%2e%2e/%2e%2e/root/.ssh/id_rsa
+```
+**Note** `%2e` is the URL encoded version of `.` (dot).
+
+- **Writing arbitrary files**: Allows the attacker to create or replace existing files. This type of vulnerability is also known as `Zip-Slip`.
+
+One way to achieve this is by using a malicious `zip` archive that holds path traversal filenames. When each filename in the zip archive gets concatenated to the target extraction folder, without validation, the final path ends up outside of the target folder. If an executable or a configuration file is overwritten with a file containing malicious code, the problem can turn into an arbitrary code execution issue quite easily.
+
+The following is an example of a `zip` archive with one benign file and one malicious file. Extracting the malicious file will result in traversing out of the target folder, ending up in `/root/.ssh/` overwriting the `authorized_keys` file:
+
+```
+2018-04-15 22:04:29 .....           19           19  good.txt
+2018-04-15 22:04:42 .....           20           20  ../../../../../../root/.ssh/authorized_keys
+```",True,619b626f-121e-49c0-92e7-9d44f171bbf0
+High,Path Traversal,java/PT,CWE-23,854,src/main/java/org/workshop/aiconferencebooking/controller/MyUpload.java,92,"Unsanitized input from an HTTP header flows into java.nio.file.Files.write, where it is used as a path. This may result in a Path Traversal vulnerability and allow an attacker to write to arbitrary files.","src/main/java/org/workshop/aiconferencebooking/controller/MyUpload.java:86  |  var uploadDir = request.getHeader(""X-Upload-Path"");","src/main/java/org/workshop/aiconferencebooking/controller/MyUpload.java:92  |  Files.write(path, file.getBytes());","1. L86  |  var uploadDir = request.getHeader(""X-Upload-Path"");
+2. L90  |  var path = Paths.get(uploadDir + File.separator + name);
+3. L92  |  Files.write(path, file.getBytes());","## Details
+
+A Directory Traversal attack (also known as path traversal) aims to access files and directories that are stored outside the intended folder. By manipulating files with ""dot-dot-slash (../)"" sequences and its variations, or by using absolute file paths, it may be possible to access arbitrary files and directories stored on file system, including application source code, configuration, and other critical system files.
+
+Being able to access and manipulate an arbitrary path leads to vulnerabilities when a program is being run with privileges that the user providing the path should not have. A website with a path traversal vulnerability would allow users access to sensitive files on the server hosting it. CLI programs may also be vulnerable to path traversal if they are being ran with elevated privileges (such as with the setuid or setgid flags in Unix systems).
+
+Directory Traversal vulnerabilities can be generally divided into two types:
+
+- **Information Disclosure**: Allows the attacker to gain information about the folder structure or read the contents of sensitive files on the system.
+
+`st` is a module for serving static files on web pages, and contains a [vulnerability of this type](https://snyk.io/vuln/npm:st:20140206). In our example, we will serve files from the `public` route.
+
+If an attacker requests the following URL from our server, it will in turn leak the sensitive private key of the root user.
+
+```
+curl http://localhost:8080/public/%2e%2e/%2e%2e/%2e%2e/%2e%2e/%2e%2e/root/.ssh/id_rsa
+```
+**Note** `%2e` is the URL encoded version of `.` (dot).
+
+- **Writing arbitrary files**: Allows the attacker to create or replace existing files. This type of vulnerability is also known as `Zip-Slip`.
+
+One way to achieve this is by using a malicious `zip` archive that holds path traversal filenames. When each filename in the zip archive gets concatenated to the target extraction folder, without validation, the final path ends up outside of the target folder. If an executable or a configuration file is overwritten with a file containing malicious code, the problem can turn into an arbitrary code execution issue quite easily.
+
+The following is an example of a `zip` archive with one benign file and one malicious file. Extracting the malicious file will result in traversing out of the target folder, ending up in `/root/.ssh/` overwriting the `authorized_keys` file:
+
+```
+2018-04-15 22:04:29 .....           19           19  good.txt
+2018-04-15 22:04:42 .....           20           20  ../../../../../../root/.ssh/authorized_keys
+```",True,36124f5e-fb21-4ce1-8110-f04cc28d357b
+High,Path Traversal,java/PT,CWE-23,854,src/main/java/org/workshop/aiconferencebooking/controller/MyUpload.java,107,"Unsanitized input from an HTTP parameter flows into java.nio.file.Files.write, where it is used as a path. This may result in a Path Traversal vulnerability and allow an attacker to write to arbitrary files.","src/main/java/org/workshop/aiconferencebooking/controller/MyUpload.java:103  |  @RequestParam(""name"") String name, Principal principal) throws IOException {","src/main/java/org/workshop/aiconferencebooking/controller/MyUpload.java:107  |  Files.write(path, file.getBytes());","1. L103  |  @RequestParam(""name"") String name, Principal principal) throws IOException {
+2. L105  |  var path = Paths.get(UPLOAD_DIRECTORY + ""/"" + name);
+3. L107  |  Files.write(path, file.getBytes());","## Details
+
+A Directory Traversal attack (also known as path traversal) aims to access files and directories that are stored outside the intended folder. By manipulating files with ""dot-dot-slash (../)"" sequences and its variations, or by using absolute file paths, it may be possible to access arbitrary files and directories stored on file system, including application source code, configuration, and other critical system files.
+
+Being able to access and manipulate an arbitrary path leads to vulnerabilities when a program is being run with privileges that the user providing the path should not have. A website with a path traversal vulnerability would allow users access to sensitive files on the server hosting it. CLI programs may also be vulnerable to path traversal if they are being ran with elevated privileges (such as with the setuid or setgid flags in Unix systems).
+
+Directory Traversal vulnerabilities can be generally divided into two types:
+
+- **Information Disclosure**: Allows the attacker to gain information about the folder structure or read the contents of sensitive files on the system.
+
+`st` is a module for serving static files on web pages, and contains a [vulnerability of this type](https://snyk.io/vuln/npm:st:20140206). In our example, we will serve files from the `public` route.
+
+If an attacker requests the following URL from our server, it will in turn leak the sensitive private key of the root user.
+
+```
+curl http://localhost:8080/public/%2e%2e/%2e%2e/%2e%2e/%2e%2e/%2e%2e/root/.ssh/id_rsa
+```
+**Note** `%2e` is the URL encoded version of `.` (dot).
+
+- **Writing arbitrary files**: Allows the attacker to create or replace existing files. This type of vulnerability is also known as `Zip-Slip`.
+
+One way to achieve this is by using a malicious `zip` archive that holds path traversal filenames. When each filename in the zip archive gets concatenated to the target extraction folder, without validation, the final path ends up outside of the target folder. If an executable or a configuration file is overwritten with a file containing malicious code, the problem can turn into an arbitrary code execution issue quite easily.
+
+The following is an example of a `zip` archive with one benign file and one malicious file. Extracting the malicious file will result in traversing out of the target folder, ending up in `/root/.ssh/` overwriting the `authorized_keys` file:
+
+```
+2018-04-15 22:04:29 .....           19           19  good.txt
+2018-04-15 22:04:42 .....           20           20  ../../../../../../root/.ssh/authorized_keys
+```",True,1456334e-5d10-47ae-9c73-5a979159ae08
+High,Path Traversal,java/PT,CWE-23,854,src/main/java/org/workshop/aiconferencebooking/controller/MyUpload.java,125,"Unsanitized input from an HTTP parameter flows into java.nio.file.Files.write, where it is used as a path. This may result in a Path Traversal vulnerability and allow an attacker to write to arbitrary files.","src/main/java/org/workshop/aiconferencebooking/controller/MyUpload.java:118  |  @RequestParam(""target"") String target, Principal principal) throws IOException {","src/main/java/org/workshop/aiconferencebooking/controller/MyUpload.java:125  |  Files.write(path, file.getBytes());","1. L118  |  @RequestParam(""target"") String target, Principal principal) throws IOException {
+2. L120  |  var subDir = target;
+3. L121  |  var resolvedDir = UPLOAD_DIRECTORY + File.separator + subDir;
+4. L123  |  var path = Paths.get(resolvedDir + File.separator + name);
+5. L125  |  Files.write(path, file.getBytes());","## Details
+
+A Directory Traversal attack (also known as path traversal) aims to access files and directories that are stored outside the intended folder. By manipulating files with ""dot-dot-slash (../)"" sequences and its variations, or by using absolute file paths, it may be possible to access arbitrary files and directories stored on file system, including application source code, configuration, and other critical system files.
+
+Being able to access and manipulate an arbitrary path leads to vulnerabilities when a program is being run with privileges that the user providing the path should not have. A website with a path traversal vulnerability would allow users access to sensitive files on the server hosting it. CLI programs may also be vulnerable to path traversal if they are being ran with elevated privileges (such as with the setuid or setgid flags in Unix systems).
+
+Directory Traversal vulnerabilities can be generally divided into two types:
+
+- **Information Disclosure**: Allows the attacker to gain information about the folder structure or read the contents of sensitive files on the system.
+
+`st` is a module for serving static files on web pages, and contains a [vulnerability of this type](https://snyk.io/vuln/npm:st:20140206). In our example, we will serve files from the `public` route.
+
+If an attacker requests the following URL from our server, it will in turn leak the sensitive private key of the root user.
+
+```
+curl http://localhost:8080/public/%2e%2e/%2e%2e/%2e%2e/%2e%2e/%2e%2e/root/.ssh/id_rsa
+```
+**Note** `%2e` is the URL encoded version of `.` (dot).
+
+- **Writing arbitrary files**: Allows the attacker to create or replace existing files. This type of vulnerability is also known as `Zip-Slip`.
+
+One way to achieve this is by using a malicious `zip` archive that holds path traversal filenames. When each filename in the zip archive gets concatenated to the target extraction folder, without validation, the final path ends up outside of the target folder. If an executable or a configuration file is overwritten with a file containing malicious code, the problem can turn into an arbitrary code execution issue quite easily.
+
+The following is an example of a `zip` archive with one benign file and one malicious file. Extracting the malicious file will result in traversing out of the target folder, ending up in `/root/.ssh/` overwriting the `authorized_keys` file:
+
+```
+2018-04-15 22:04:29 .....           19           19  good.txt
+2018-04-15 22:04:42 .....           20           20  ../../../../../../root/.ssh/authorized_keys
+```",True,dbe250f4-5cc6-4285-b9c7-30b5b33d4fc9
+High,SQL Injection,java/Sqli,CWE-89,770,src/main/java/org/workshop/aiconferencebooking/controller/OldHomeController.java,53,"Unsanitized input from an HTTP parameter flows into createNativeQuery, where it is used in an SQL query. This may result in an SQL Injection vulnerability.","src/main/java/org/workshop/aiconferencebooking/controller/OldHomeController.java:41  |  public String searchTalks(Model model, @RequestParam String input) {","src/main/java/org/workshop/aiconferencebooking/controller/OldHomeController.java:53  |  var query = em.createNativeQuery(""select * from Talk t where lower(description) like '%"" + lowerInput + ""%' OR lower(title) like '%"" + lowerInput + ""%'"", Talk.class);","1. L41  |  public String searchTalks(Model model, @RequestParam String input) {
+2. L45  |  model.addAttribute(""talks"", searchTalk(input));
+3. L50  |  public List<Talk> searchTalk(String input) {
+4. L52  |  var lowerInput = input.toLowerCase();
+5. L53  |  var query = em.createNativeQuery(""select * from Talk t where lower(description) like '%"" + lowerInput + ""%' OR lower(title) like '%"" + lowerInput + ""%'"", Talk.class);","## Details
+
+In an SQL injection attack, the user can submit an SQL query directly to the database, gaining access without providing appropriate credentials. Attackers can then view, export, modify, and delete confidential information; change passwords and other authentication information; and possibly gain access to other systems within the network. This is one of the most commonly exploited categories of vulnerability, but can largely be avoided through good coding practices.
+
+## Best practices for prevention
+* Avoid passing user-entered parameters directly to the SQL server.
+* Avoid using string concatenation to build SQL queries from user-entered parameters.
+* When coding, define SQL code first, then pass in parameters. Use prepared statements with parameterized queries. Examples include `SqlCommand()` in .NET and `bindParam()` in PHP.
+* Use strong typing for all parameters so unexpected user data will be rejected.
+* Where direct user input cannot be avoided for performance reasons, validate input against a very strict allowlist of permitted characters, avoiding special characters such as `? & / < > ; - ' "" \` and spaces. Use a vendor-supplied escaping routine if possible.
+* Develop your application in an environment and/or using libraries that provide protection against SQL injection.
+* Harden your entire environment around a least-privilege model, ideally with isolated accounts with privileges only for particular tasks.",True,2313de65-9bb1-4a6d-b6ac-a12483870b5d
+High,Cross-site Scripting (XSS),java/XSS,CWE-79,757,src/main/java/org/workshop/aiconferencebooking/controller/TalkController.java,51,"Unsanitized input from an HTTP parameter flows into write, where it is used to render an HTML page returned to the user. This may result in a Cross-Site Scripting attack (XSS).","src/main/java/org/workshop/aiconferencebooking/controller/TalkController.java:32  |  @RequestParam String username, HttpServletResponse response","src/main/java/org/workshop/aiconferencebooking/controller/TalkController.java:51  |  writer.write(String.format(getPageTemplate(), usernameStr, talksStr));","1. L32  |  @RequestParam String username, HttpServletResponse response
+2. L39  |  buildTalksPage(username, talks, writer);
+3. L43  |  private void buildTalksPage(String username, List<Talk> talks, PrintWriter writer) throws IOException {
+4. L49  |  String usernameStr = ""<h1>"" + username + ""'s talks<h1>"";
+5. L51  |  writer.write(String.format(getPageTemplate(), usernameStr, talksStr));","## Details
+
+A cross-site scripting attack occurs when the attacker tricks a legitimate web-based application or site to accept a request as originating from a trusted source.
+
+This is done by escaping the context of the web application; the web application then delivers that data to its users along with other trusted dynamic content, without validating it. The browser unknowingly executes malicious script on the client side (through client-side languages; usually JavaScript or HTML)  in order to perform actions that are otherwise typically blocked by the browser's Same Origin Policy.
+
+Injecting malicious code is the most prevalent manner by which XSS is exploited; for this reason, escaping characters in order to prevent this manipulation is the top method for securing code against this vulnerability.
+
+Escaping means that the application is coded to mark key characters, and particularly key characters included in user input, to prevent those characters from being interpreted in a dangerous context. For example, in HTML, `<` can be coded as  `&lt`; and `>` can be coded as `&gt`; in order to be interpreted and displayed as themselves in text, while within the code itself, they are used for HTML tags. If malicious content is injected into an application that escapes special characters and that malicious content uses `<` and `>` as HTML tags, those characters are nonetheless not interpreted as HTML tags by the browser if they've been correctly escaped in the application code and in this way the attempted attack is diverted.
+
+The most prominent use of XSS is to steal cookies (source: OWASP HttpOnly) and hijack user sessions, but XSS exploits have been used to expose sensitive information, enable access to privileged services and functionality and deliver malware.
+
+### Types of attacks
+There are a few methods by which XSS can be manipulated:
+
+|Type|Origin|Description|
+|--|--|--|
+|**Stored**|Server|The malicious code is inserted in the application (usually as a link) by the attacker. The code is activated every time a user clicks the link.|
+|**Reflected**|Server|The attacker delivers a malicious link externally from the vulnerable web site application to a user. When clicked, malicious code is sent to the vulnerable web site, which reflects the attack back to the user's browser.|
+|**DOM-based**|Client|The attacker forces the user's browser to render a malicious page. The data in the page itself delivers the cross-site scripting data.|
+|**Mutated**| |The attacker injects code that appears safe, but is then rewritten and modified by the browser, while parsing the markup. An example is rebalancing unclosed quotation marks or even adding quotation marks to unquoted parameters.|
+
+### Affected environments
+The following environments are susceptible to an XSS attack:
+
+* Web servers
+* Application servers
+* Web application environments
+
+## Best practices for prevention
+This section describes the top best practices designed to specifically protect your code:
+
+* Sanitize data input in an HTTP request before reflecting it back, ensuring all data is validated, filtered or escaped before echoing anything back to the user, such as the values of query parameters during searches.
+* Convert special characters such as `?`, `&`, `/`, `<`, `>` and spaces to their respective HTML or URL encoded equivalents.
+* Give users the option to disable client-side scripts.
+* Redirect invalid requests.
+* Detect simultaneous logins, including those from two separate IP addresses, and invalidate those sessions.
+* Use and enforce a Content Security Policy (source: Wikipedia) to disable any features that might be manipulated for an XSS attack.
+* Read the documentation for any of the libraries referenced in your code to understand which elements allow for embedded HTML.",True,c7787d11-cb08-49b1-9799-e4e283c3e36c
+Medium,Use of Hardcoded Passwords,java/HardcodedPassword,"CWE-798, CWE-259",564,src/main/java/org/workshop/aiconferencebooking/Filler.java,86,Do not hardcode passwords in code. Found hardcoded password used in here.,"src/main/java/org/workshop/aiconferencebooking/Filler.java:86  |  createAttendee(faker.name().username(), ""123123"");","src/main/java/org/workshop/aiconferencebooking/Filler.java:86  |  createAttendee(faker.name().username(), ""123123"");","1. L86  |  createAttendee(faker.name().username(), ""123123"");","## Details
+
+Developers may use hardcoded passwords during development to streamline setup or simplify authentication while testing. Although these passwords are intended to be removed before deployment, they are sometimes inadvertently left in the code. This introduces serious security risks, especially if the password grants elevated privileges or is reused across multiple systems.
+
+An attacker who discovers a hardcoded password can potentially gain unauthorized access, escalate privileges, exfiltrate sensitive data, or disrupt service availability. If the password is reused across different environments or applications, the compromise can spread quickly and broadly.
+
+## Best practices for prevention
+* Plan software architecture such that keys and passwords are always stored outside the code, wherever possible.
+* Plan encryption into software architecture for all credential information and ensure proper handling of keys, credentials, and passwords.
+* Prompt for a secure password on first login rather than hard-code a default password.
+* If a hardcoded password or credential must be used, limit its use, for example, to system console users rather than via the network.
+* Use strong hashes for inbound password authentication, ideally with randomly assigned salts to increase the difficulty level in case of brute-force attack.",True,e01a9c6c-d35b-4531-a6f5-1d6187ebb350
+Medium,Use of Hardcoded Passwords,java/HardcodedPassword,"CWE-798, CWE-259",564,src/main/java/org/workshop/aiconferencebooking/Filler.java,93,Do not hardcode passwords in code. Found hardcoded password used in here.,"src/main/java/org/workshop/aiconferencebooking/Filler.java:93  |  ret.add(createSpeaker(faker.name().username(), ""123123""));","src/main/java/org/workshop/aiconferencebooking/Filler.java:93  |  ret.add(createSpeaker(faker.name().username(), ""123123""));","1. L93  |  ret.add(createSpeaker(faker.name().username(), ""123123""));","## Details
+
+Developers may use hardcoded passwords during development to streamline setup or simplify authentication while testing. Although these passwords are intended to be removed before deployment, they are sometimes inadvertently left in the code. This introduces serious security risks, especially if the password grants elevated privileges or is reused across multiple systems.
+
+An attacker who discovers a hardcoded password can potentially gain unauthorized access, escalate privileges, exfiltrate sensitive data, or disrupt service availability. If the password is reused across different environments or applications, the compromise can spread quickly and broadly.
+
+## Best practices for prevention
+* Plan software architecture such that keys and passwords are always stored outside the code, wherever possible.
+* Plan encryption into software architecture for all credential information and ensure proper handling of keys, credentials, and passwords.
+* Prompt for a secure password on first login rather than hard-code a default password.
+* If a hardcoded password or credential must be used, limit its use, for example, to system console users rather than via the network.
+* Use strong hashes for inbound password authentication, ideally with randomly assigned salts to increase the difficulty level in case of brute-force attack.",True,e6821597-0cf3-4a0c-81f4-fe46f1f85916
