@@ -1,29 +1,40 @@
 # snyk-code-to-csv
 
-Run `snyk code test` and export the results to **CSV**, a **PDF report**, and/or
-a **Word (DOCX) report** that includes the **full source-to-sink data flow**
-(with real code snippets) and the **remediation advice** ("how to fix") for
-every issue.
+Run Snyk **Code** (SAST) and/or **Open Source** (SCA) tests and export the
+results to **CSV**, a **PDF report**, and/or a **Word (DOCX) report**. Each
+finding includes the full **source-to-sink data flow** (Code, with real code
+snippets) or **dependency path** (SCA), plus the **remediation advice** ("how to
+fix") — all in one unified report.
 
-## Why SARIF (not `--json` or `snyk-to-html`)
+## What each scan contributes
 
-Snyk Code can emit `--json`, `--sarif`, and you can render `snyk-to-html`.
-Only **SARIF** carries everything this utility needs in one structured place:
+`--type` selects which tests run: `code` (default), `sca`, or `both`. Both kinds
+of finding land in the **same** output file, tagged with a `scan_type` column.
 
-| Need | Where it lives in SARIF |
-|------|-------------------------|
-| Source → sink data flow | `runs[].results[].codeFlows[].threadFlows[].locations[]` (file + line per step) |
-| Remediation / how to fix | `runs[].tool.driver.rules[].help.markdown` |
-| CWE / title | `rules[].properties.cwe`, `rules[].shortDescription` |
-| Severity | `results[].level` (error→High, warning→Medium, note→Low) |
-| Priority score / autofixable | `results[].properties` |
+| | Snyk **Code** (`snyk code test`) | Snyk **Open Source / SCA** (`snyk test`) |
+|---|---|---|
+| Flags | a vulnerable line of source | a vulnerable dependency `pkg@version` |
+| "source → sink" | taint data flow with code snippets | dependency path (`from[]` — how it's pulled in) |
+| How to fix | rule best-practices guidance | upgrade to the `fixedIn` version / upgrade path |
+| IDs | CWE | CWE **+ CVE + CVSS score** |
+| Source format | SARIF (`--sarif`) | JSON (`--json`) |
 
-The data-flow steps in SARIF are file+line only (no inline code), so this tool
-reads the source files from disk to attach the actual code line to each step.
+### Why these formats
+
+For **Code**, SARIF is the only format carrying the data flow
+(`codeFlows[].threadFlows[].locations[]`) *and* remediation
+(`rules[].help.markdown`) in one place. SARIF gives file+line per step only, so
+the tool reads the source files from disk to attach the real code line.
+
+For **SCA**, the JSON output is the richest — it carries the dependency path
+(`from[]`), `fixedIn` / `upgradePath`, CVE/CVSS, and exploit maturity that the
+SCA SARIF omits.
 
 ## Requirements
 
 - [Snyk CLI](https://docs.snyk.io/snyk-cli) authenticated (`snyk auth`)
+- For SCA (`--type sca`/`both`): the project's package manifests / lockfiles
+  (e.g. `pom.xml`, `package-lock.json`) must be present so `snyk test` can resolve dependencies
 - Python 3 — CSV export uses the **standard library only**
 - For PDF export only: `pip3 install reportlab` (pure Python, no system deps).
 - For DOCX export only: `pip3 install python-docx` (pure Python, no system deps).
@@ -34,27 +45,25 @@ reads the source files from disk to attach the actual code line to each step.
 ## Usage
 
 ```bash
-# Scan a project -> snyk-code-results.csv
+# Snyk Code scan -> snyk-results.csv (default --type code)
 ./snyk_code_to_csv.py /path/to/project
 
-# PDF report instead of CSV  -> snyk-code-results.pdf
-./snyk_code_to_csv.py /path/to/project --format pdf
+# Open-source / SCA scan only
+./snyk_code_to_csv.py /path/to/project --type sca
 
-# Word document  -> snyk-code-results.docx
+# Both Code and SCA in one unified report
+./snyk_code_to_csv.py /path/to/project --type both --format pdf -o report
+
+# Formats: pdf, docx, all, or a comma-separated list
 ./snyk_code_to_csv.py /path/to/project --format docx
-
-# Several formats with a custom base name -> report.csv, report.pdf, report.docx
-./snyk_code_to_csv.py /path/to/project --format all -o report
+./snyk_code_to_csv.py /path/to/project --type both --format all -o report
 ./snyk_code_to_csv.py /path/to/project --format csv,docx -o report
 
-# Current directory, custom output
-./snyk_code_to_csv.py . -o findings.csv
-
-# Re-use an existing SARIF file (no re-scan)
+# Re-use an existing Snyk Code SARIF file (no re-scan; --type code)
 ./snyk_code_to_csv.py --sarif-input results.sarif --project-root /path/to/project
 
 # Pass extra flags through to the Snyk CLI (after `--`)
-./snyk_code_to_csv.py . -- --org=my-org --severity-threshold=medium
+./snyk_code_to_csv.py . --type both -- --org=my-org --severity-threshold=high
 ```
 
 ### Output formats
@@ -65,11 +74,12 @@ extension is set automatically per format (so `-o report --format all` writes
 `report.csv`, `report.pdf`, and `report.docx`).
 
 The **PDF** and **DOCX** reports share the same structure: a summary header
-(project, date, issue counts) followed by one section per finding — a
-severity-coloured title, a metadata table (file:line, rule, CWE, priority
-score, auto-fixable), the message, the full numbered source→sink data flow in
-monospace, and the remediation guidance with its headings and bullet lists
-rendered.
+(project, scan type, date, issue counts) followed by one section per finding — a
+severity- and type-tagged title (`[High] [Code]`, `[Critical] [SCA]`), a
+metadata table, the message, the numbered data flow / dependency path in
+monospace, and the remediation guidance with headings and bullet lists rendered.
+The metadata table and flow label adapt to the finding type (data flow + rule
+for Code; dependency path + package/CVE/CVSS/fixed-in for SCA).
 
 > `--project-root` is the directory the SARIF file paths are relative to. It
 > defaults to the scan target, so you only need it with `--sarif-input`.
@@ -80,20 +90,30 @@ rendered.
 
 ## CSV columns
 
-| Column | Description |
-|--------|-------------|
-| `severity` | High / Medium / Low |
-| `issue_title` | e.g. "SQL Injection" |
-| `rule_id` | e.g. `java/Sqli` |
-| `cwe` | e.g. `CWE-89` |
-| `priority_score` | Snyk priority score (0–1000) |
-| `file`, `line` | Primary (sink) location |
-| `message` | The finding description |
-| `source` | First data-flow step (`file:line | code`) |
-| `sink` | Last data-flow step (`file:line | code`) |
-| `data_flow` | Full numbered source→sink path with code, one step per line |
-| `remediation` | Rule help markdown (Details + best practices) |
-| `autofixable` | Whether Snyk can auto-fix it |
-| `fingerprint` | Stable issue identity for de-duping across runs |
+The CSV is a unified superset; columns that don't apply to a finding's
+`scan_type` are left blank (e.g. `cve`/`cvss`/`package` are SCA-only,
+`priority_score`/`autofixable` are Code-only).
 
-Rows are sorted by severity, then file, then line.
+| Column | Applies to | Description |
+|--------|-----------|-------------|
+| `scan_type` | both | `Code` or `SCA` |
+| `severity` | both | Critical / High / Medium / Low |
+| `issue_title` | both | e.g. "SQL Injection" |
+| `rule_id` | both | Code rule (`java/Sqli`) or Snyk vuln ID (`SNYK-JAVA-...`) |
+| `cwe` | both | e.g. `CWE-89` |
+| `cve` | SCA | e.g. `CVE-2026-8178` |
+| `cvss` | SCA | CVSS score |
+| `package` | SCA | Vulnerable `package@version` |
+| `fixed_in` | SCA | Version(s) that contain the fix |
+| `exploit_maturity` | SCA | e.g. "Mature", "Not Defined" |
+| `priority_score` | Code | Snyk priority score (0–1000) |
+| `file`, `line` | both | Code: sink location. SCA: manifest file |
+| `message` | both | The finding description |
+| `source` | both | First flow step — Code: `file:line | code`; SCA: top-level dependency |
+| `sink` | both | Last flow step — Code: the sink; SCA: the vulnerable package |
+| `data_flow` | both | Code: numbered source→sink path with code. SCA: dependency path |
+| `remediation` | both | Code: rule best-practices. SCA: upgrade advice + introduced-through + description |
+| `autofixable` | Code | Whether Snyk can auto-fix it |
+| `fingerprint` | both | Stable issue identity for de-duping across runs |
+
+Rows are sorted by severity (Critical first), then scan type, then file.

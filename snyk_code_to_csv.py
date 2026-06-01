@@ -11,7 +11,7 @@ carries both the data-flow steps (codeFlows/threadFlows) and the per-rule
 remediation guidance (rule.help.markdown).
 
 Usage:
-    # Scan a project and write snyk-code-results.csv
+    # Scan a project and write snyk-results.csv
     ./snyk_code_to_csv.py /path/to/project
 
     # Produce a PDF report instead (or both)
@@ -41,15 +41,22 @@ import subprocess
 import sys
 import tempfile
 
-# SARIF `level` -> Snyk severity label
+# SARIF `level` -> Snyk severity label (Snyk Code uses error/warning/note)
 LEVEL_TO_SEVERITY = {"error": "High", "warning": "Medium", "note": "Low"}
-SEVERITY_ORDER = {"High": 0, "Medium": 1, "Low": 2}
+# SCA adds a Critical tier; sort Critical first
+SEVERITY_ORDER = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}
 
 CSV_COLUMNS = [
+    "scan_type",
     "severity",
     "issue_title",
     "rule_id",
     "cwe",
+    "cve",
+    "cvss",
+    "package",
+    "fixed_in",
+    "exploit_maturity",
     "priority_score",
     "file",
     "line",
@@ -61,6 +68,11 @@ CSV_COLUMNS = [
     "autofixable",
     "fingerprint",
 ]
+
+
+def blank_row():
+    """A row dict with every column present (so writers can index any key)."""
+    return {col: "" for col in CSV_COLUMNS}
 
 
 def validate_input_path(raw_path):
@@ -104,6 +116,29 @@ def run_snyk_code(target, extra_args):
     if not os.path.getsize(tmp.name):
         sys.stderr.write(result.stdout.decode("utf-8", "replace"))
         raise SystemExit("snyk produced no SARIF output (no results or scan error)")
+    return tmp.name
+
+
+def run_snyk_sca(target, extra_args):
+    """Run `snyk test` (open source) writing JSON to a temp file.
+
+    Returns the JSON path, or None if there were no supported manifests to scan
+    (so `--type both` can still report Code results).
+    """
+    tmp = tempfile.NamedTemporaryFile(prefix="snyk-sca-", suffix=".json", delete=False)
+    tmp.close()
+    cmd = ["snyk", "test", target, "--all-projects", f"--json-file-output={tmp.name}"]
+    cmd.extend(extra_args)
+    print(f"Running: {' '.join(cmd)}", file=sys.stderr)
+    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    # 0 = clean, 1 = vulns found -> both fine. 3 = no supported projects found.
+    if not os.path.getsize(tmp.name):
+        output = result.stdout.decode("utf-8", "replace")
+        if result.returncode in (0, 3):
+            print("No open-source dependencies found to scan (SCA skipped).", file=sys.stderr)
+            return None
+        sys.stderr.write(output)
+        raise SystemExit(f"snyk test failed (exit {result.returncode})")
     return tmp.name
 
 
@@ -178,7 +213,7 @@ def extract_flow_steps(result):
     return steps
 
 
-def render_flow(steps, reader, project_root):
+def render_flow(steps, reader):
     """Render the full source-to-sink path with code snippets, one step per line."""
     lines = []
     multi_file = len({uri for uri, _ in steps}) > 1
@@ -198,7 +233,7 @@ def endpoint(steps, reader, which):
     return f"{uri}:{line_no}  |  {code}".rstrip(" |")
 
 
-def result_to_row(result, rules, by_id, reader, project_root):
+def result_to_row(result, rules, by_id, reader):
     rule = get_rule(result, rules, by_id)
     props = result.get("properties", {}) or {}
 
@@ -208,7 +243,9 @@ def result_to_row(result, rules, by_id, reader, project_root):
 
     steps = extract_flow_steps(result)
 
-    return {
+    row = blank_row()
+    row.update({
+        "scan_type": "Code",
         "severity": severity,
         "issue_title": rule.get("shortDescription", {}).get("text", rule.get("name", "")),
         "rule_id": result.get("ruleId", ""),
@@ -219,23 +256,106 @@ def result_to_row(result, rules, by_id, reader, project_root):
         "message": result.get("message", {}).get("text", ""),
         "source": endpoint(steps, reader, "source"),
         "sink": endpoint(steps, reader, "sink"),
-        "data_flow": render_flow(steps, reader, project_root),
+        "data_flow": render_flow(steps, reader),
         "remediation": (rule.get("help", {}).get("markdown")
                         or rule.get("help", {}).get("text", "")).strip(),
         "autofixable": props.get("isAutofixable", ""),
         "fingerprint": (result.get("fingerprints", {}) or {}).get("identity", "")
         or (result.get("fingerprints", {}) or {}).get("0", ""),
-    }
+    })
+    return row
 
 
-def sarif_to_rows(sarif, reader, project_root):
+def sarif_to_rows(sarif, reader):
     rows = []
     for run in sarif.get("runs", []):
         rules, by_id = build_rule_index(run)
         for result in run.get("results", []):
-            rows.append(result_to_row(result, rules, by_id, reader, project_root))
+            rows.append(result_to_row(result, rules, by_id, reader))
+    return rows
+
+
+# --- SCA (open source) parsing ---------------------------------------------
+
+def _upgrade_advice(vuln):
+    """A one-line fix sentence from the SCA upgrade/patch/fixed-in data."""
+    pkg = vuln.get("packageName", "the package")
+    fixed_in = vuln.get("fixedIn") or []
+    if vuln.get("isUpgradable"):
+        # upgradePath[0] is often `false` (the top dep can't be pinned); the
+        # first string entry is the direct dependency to bump.
+        direct = next((p for p in vuln.get("upgradePath", []) if isinstance(p, str)), None)
+        if direct:
+            target = f" (fixed in `{pkg}` {', '.join(fixed_in)})" if fixed_in else ""
+            return f"Upgrade `{direct}`{target}."
+    if fixed_in:
+        return f"Upgrade `{pkg}` to {fixed_in[0]} or later."
+    if vuln.get("isPatchable"):
+        return f"A Snyk patch is available for `{pkg}`."
+    return f"No fixed version is available yet for `{pkg}`."
+
+
+def vuln_to_row(vuln, manifest):
+    pkg = vuln.get("packageName", "")
+    version = vuln.get("version", "")
+    chain = vuln.get("from", []) or []
+    ids = vuln.get("identifiers", {}) or {}
+    cve = ", ".join(ids.get("CVE", []) or [])
+    cwe = ", ".join(ids.get("CWE", []) or [])
+
+    flow = "\n".join(f"{i}. {'  ' * min(i - 1, 8)}{dep}" for i, dep in enumerate(chain, 1))
+    fix = _upgrade_advice(vuln)
+    intro = " → ".join(chain)
+    remediation = f"**Fix:** {fix}\n\n**Introduced through:** {intro}\n\n{vuln.get('description', '')}".strip()
+
+    severity = (vuln.get("severityWithCritical") or vuln.get("severity") or "").capitalize()
+
+    row = blank_row()
+    row.update({
+        "scan_type": "SCA",
+        "severity": severity,
+        "issue_title": vuln.get("title", ""),
+        "rule_id": vuln.get("id", ""),
+        "cwe": cwe,
+        "cve": cve,
+        "cvss": vuln.get("cvssScore", ""),
+        "package": f"{pkg}@{version}" if version else pkg,
+        "fixed_in": ", ".join(vuln.get("fixedIn") or []),
+        "exploit_maturity": vuln.get("exploit", ""),
+        "file": manifest,
+        "message": f"{vuln.get('title', '')} in {pkg}@{version}".strip(),
+        "source": chain[0] if chain else "",
+        "sink": chain[-1] if chain else f"{pkg}@{version}",
+        "data_flow": flow,
+        "remediation": remediation,
+        "fingerprint": vuln.get("id", ""),
+    })
+    return row
+
+
+def sca_json_to_rows(sca):
+    """Parse `snyk test --json` output (single object or --all-projects array)."""
+    projects = sca if isinstance(sca, list) else [sca]
+    rows = []
+    for proj in projects:
+        if not isinstance(proj, dict) or proj.get("error"):
+            continue
+        manifest = proj.get("displayTargetFile") or proj.get("targetFile") or proj.get("projectName", "")
+        seen = set()
+        for vuln in proj.get("vulnerabilities", []) or []:
+            vid = vuln.get("id")
+            # the same vuln id can appear once per dependency path; keep the first
+            if vid in seen:
+                continue
+            seen.add(vid)
+            rows.append(vuln_to_row(vuln, manifest))
+    return rows
+
+
+def sort_rows(rows):
     rows.sort(key=lambda r: (SEVERITY_ORDER.get(r["severity"], 9),
-                             r["file"], r["line"] if isinstance(r["line"], int) else 0))
+                             r["scan_type"], r["file"],
+                             r["line"] if isinstance(r["line"], int) else 0))
     return rows
 
 
@@ -248,10 +368,12 @@ def severity_counts(rows):
 
 def summary_text(rows):
     counts = severity_counts(rows)
-    return ", ".join(f"{counts[s]} {s}" for s in ("High", "Medium", "Low") if s in counts)
+    return ", ".join(f"{counts[s]} {s}"
+                     for s in ("Critical", "High", "Medium", "Low") if s in counts)
 
 
-def write_csv(rows, path, meta=None):
+def write_csv(rows, path, _meta=None):
+    # _meta is accepted for a uniform writer signature; CSV doesn't use it.
     with open(path, "w", encoding="utf-8", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=CSV_COLUMNS)
         writer.writeheader()
@@ -260,7 +382,32 @@ def write_csv(rows, path, meta=None):
 
 # --- PDF export ------------------------------------------------------------
 
-SEVERITY_COLORS = {"High": "#d1352c", "Medium": "#d98c00", "Low": "#3b7dd8"}
+SEVERITY_COLORS = {"Critical": "#9b1c1c", "High": "#d1352c",
+                   "Medium": "#d98c00", "Low": "#3b7dd8"}
+
+
+def finding_meta(r):
+    """Per-finding metadata table rows and flow-section label, by scan type."""
+    if r["scan_type"] == "SCA":
+        info = [
+            ("Package", r["package"]),
+            ("Manifest", r["file"]),
+            ("CVE", r["cve"] or "-"),
+            ("CVSS", str(r["cvss"]) or "-"),
+            ("CWE", r["cwe"] or "-"),
+            ("Fixed in", r["fixed_in"] or "-"),
+            ("Exploit maturity", r["exploit_maturity"] or "-"),
+            ("Snyk ID", r["rule_id"]),
+        ]
+        return info, "Dependency path (introduced through)"
+    info = [
+        ("File", f'{r["file"]}:{r["line"]}'),
+        ("Rule", r["rule_id"]),
+        ("CWE", r["cwe"] or "-"),
+        ("Priority score", str(r["priority_score"]) or "-"),
+        ("Auto-fixable", str(r["autofixable"]) or "-"),
+    ]
+    return info, "Data flow (source → sink)"
 
 
 def _escape(text):
@@ -388,9 +535,10 @@ def write_pdf(rows, path, meta):
     story = []
 
     # Header
-    story.append(Paragraph("Snyk Code Security Report", styles["title"]))
+    story.append(Paragraph("Snyk Security Report", styles["title"]))
     story.append(Paragraph(
         f"Project: {_escape(meta['project'])}<br/>"
+        f"Scan: {_escape(meta['scan'])}<br/>"
         f"Generated: {meta['date']}<br/>"
         f"Total issues: {len(rows)} ({summary_text(rows) or 'none'})", styles["meta"]))
     story.append(Spacer(1, 8))
@@ -398,20 +546,14 @@ def write_pdf(rows, path, meta):
 
     for idx, r in enumerate(rows, 1):
         sev = r["severity"]
-        color = colors.HexColor(SEVERITY_COLORS.get(sev, "#666666"))
+        info, flow_label = finding_meta(r)
         story.append(Spacer(1, 8))
         story.append(Paragraph(
             f'<font color="{SEVERITY_COLORS.get(sev, "#666666")}">[{sev}]</font> '
+            f'<font color="#888888">[{r["scan_type"]}]</font> '
             f'{idx}. {_escape(r["issue_title"])}', styles["finding"]))
 
-        info = [
-            ["File", f'{r["file"]}:{r["line"]}'],
-            ["Rule", r["rule_id"]],
-            ["CWE", r["cwe"] or "-"],
-            ["Priority score", str(r["priority_score"]) or "-"],
-            ["Auto-fixable", str(r["autofixable"]) or "-"],
-        ]
-        tbl = Table([[k, v] for k, v in info], colWidths=[28 * mm, 146 * mm])
+        tbl = Table([[k, str(v)] for k, v in info], colWidths=[30 * mm, 144 * mm])
         tbl.setStyle(TableStyle([
             ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
             ("FONTNAME", (1, 0), (1, -1), "Helvetica"),
@@ -421,14 +563,15 @@ def write_pdf(rows, path, meta):
             ("TOPPADDING", (0, 0), (-1, -1), 2),
             ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
             ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ]))
         story.append(tbl)
 
         if r["message"]:
             story.append(Paragraph(_inline_md(r["message"]), styles["body"]))
 
-        story.append(Paragraph("Data flow (source &rarr; sink)", styles["label"]))
-        story.append(Preformatted(_wrap_mono(r["data_flow"] or "(no data flow)"), styles["code"]))
+        story.append(Paragraph(_escape(flow_label), styles["label"]))
+        story.append(Preformatted(_wrap_mono(r["data_flow"] or "(none)"), styles["code"]))
 
         if r["remediation"]:
             story.append(Paragraph("Remediation", styles["label"]))
@@ -519,10 +662,12 @@ def write_docx(rows, path, meta):
         )
 
     doc = Document()
-    doc.add_heading("Snyk Code Security Report", level=0)
+    doc.add_heading("Snyk Security Report", level=0)
     intro = doc.add_paragraph()
     intro.add_run("Project: ").bold = True
     intro.add_run(meta["project"])
+    intro.add_run("\nScan: ").bold = True
+    intro.add_run(meta["scan"])
     intro.add_run("\nGenerated: ").bold = True
     intro.add_run(meta["date"])
     intro.add_run("\nTotal issues: ").bold = True
@@ -530,25 +675,21 @@ def write_docx(rows, path, meta):
 
     for idx, r in enumerate(rows, 1):
         sev = r["severity"]
+        info, flow_label = finding_meta(r)
         heading = doc.add_heading(level=1)
         hexcol = SEVERITY_COLORS.get(sev, "#666666")
         sev_run = heading.add_run(f"[{sev}] ")
         sev_run.font.color.rgb = RGBColor.from_string(hexcol.lstrip("#"))
+        type_run = heading.add_run(f"[{r['scan_type']}] ")
+        type_run.font.color.rgb = RGBColor.from_string("888888")
         heading.add_run(f"{idx}. {r['issue_title']}")
 
-        info = [
-            ("File", f'{r["file"]}:{r["line"]}'),
-            ("Rule", r["rule_id"]),
-            ("CWE", r["cwe"] or "-"),
-            ("Priority score", str(r["priority_score"]) or "-"),
-            ("Auto-fixable", str(r["autofixable"]) or "-"),
-        ]
         table = doc.add_table(rows=0, cols=2)
         table.style = "Light List Accent 1"
         for key, val in info:
             cells = table.add_row().cells
             cells[0].text = key
-            cells[1].text = val
+            cells[1].text = str(val)
             for para in cells[0].paragraphs:
                 for run in para.runs:
                     run.bold = True
@@ -557,8 +698,8 @@ def write_docx(rows, path, meta):
             doc.add_paragraph(r["message"])
 
         p = doc.add_paragraph()
-        p.add_run("Data flow (source → sink)").bold = True
-        for fline in (r["data_flow"] or "(no data flow)").split("\n"):
+        p.add_run(flow_label).bold = True
+        for fline in (r["data_flow"] or "(none)").split("\n"):
             cp = doc.add_paragraph()
             run = cp.add_run(fline)
             run.font.name = "Courier New"
@@ -599,48 +740,72 @@ def parse_formats(fmt_arg):
 
 def resolve_outputs(output_arg, formats):
     """Map --output + parsed formats to concrete {format: path} targets."""
-    base = output_arg or "snyk-code-results"
+    base = output_arg or "snyk-results"
     base = re.sub(r"\.(csv|pdf|docx)$", "", base, flags=re.IGNORECASE)
     return {fmt: f"{base}.{fmt}" for fmt in formats}
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Export Snyk Code findings (source-to-sink + remediation) to CSV, PDF and/or DOCX.",
+        description="Export Snyk Code and/or SCA findings (source-to-sink / dependency "
+                    "path + remediation) to CSV, PDF and/or DOCX.",
         epilog="Pass extra Snyk CLI flags after '--', e.g. -- --org=acme --severity-threshold=high",
     )
     parser.add_argument("target", nargs="?", default=".",
                         help="Path to the project to scan (default: current dir)")
+    parser.add_argument("-t", "--type", choices=("code", "sca", "both"), default="code",
+                        help="Which Snyk tests to run: code (Snyk Code, default), "
+                             "sca (open-source dependencies), or both")
     parser.add_argument("-f", "--format", default="csv",
                         help="Output format(s): csv, pdf, docx, all, or a comma-separated "
                              "list e.g. 'csv,docx' (default: csv)")
     parser.add_argument("-o", "--output",
                         help="Output path/base name (extension is set per format; "
-                             "default: snyk-code-results)")
+                             "default: snyk-results)")
     parser.add_argument("--sarif-input",
-                        help="Use an existing SARIF file instead of running a scan")
+                        help="Use an existing Snyk Code SARIF file instead of scanning "
+                             "(implies --type code)")
     parser.add_argument("--project-root",
                         help="Root the SARIF paths are relative to "
                              "(default: target, or sarif file's dir with --sarif-input)")
     parser.add_argument("snyk_args", nargs="*",
-                        help="Extra args passed through to `snyk code test`")
+                        help="Extra args passed through to the Snyk CLI")
     args = parser.parse_args()
 
+    rows = []
     if args.sarif_input:
+        if args.type != "code":
+            print("Note: --sarif-input is a Snyk Code SARIF; ignoring --type "
+                  f"{args.type} (SCA needs a live scan).", file=sys.stderr)
         sarif_path = validate_input_path(args.sarif_input)
         project_root = args.project_root or os.path.dirname(sarif_path) or "."
+        with open(sarif_path, "r", encoding="utf-8") as fh:
+            sarif = json.load(fh)
+        rows += sarif_to_rows(sarif, SourceReader(project_root))
+        scan_label = "Snyk Code (from SARIF)"
     else:
-        sarif_path = run_snyk_code(args.target, args.snyk_args)
         project_root = args.project_root or args.target
+        run_code = args.type in ("code", "both")
+        run_sca = args.type in ("sca", "both")
+        labels = []
+        if run_code:
+            sarif_path = run_snyk_code(args.target, args.snyk_args)
+            with open(sarif_path, "r", encoding="utf-8") as fh:
+                rows += sarif_to_rows(json.load(fh), SourceReader(project_root))
+            labels.append("Snyk Code")
+        if run_sca:
+            sca_path = run_snyk_sca(args.target, args.snyk_args)
+            if sca_path:
+                with open(sca_path, "r", encoding="utf-8") as fh:
+                    rows += sca_json_to_rows(json.load(fh))
+                labels.append("Snyk Open Source (SCA)")
+        scan_label = " + ".join(labels) or "Snyk"
 
-    with open(sarif_path, "r", encoding="utf-8") as fh:
-        sarif = json.load(fh)
-
-    reader = SourceReader(project_root)
-    rows = sarif_to_rows(sarif, reader, project_root)
+    sort_rows(rows)
     targets = resolve_outputs(args.output, parse_formats(args.format))
 
     meta = {"project": os.path.abspath(project_root),
+            "scan": scan_label,
             "date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")}
     writers = {"csv": write_csv, "pdf": write_pdf, "docx": write_docx}
 

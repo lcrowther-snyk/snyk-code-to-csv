@@ -1,0 +1,11 @@
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+
+# Generated Snyk report outputs
+snyk-results.csv
+snyk-results.pdf
+snyk-results.docx
+snyk-code-results.*
+findings.csv
+*.sarif
