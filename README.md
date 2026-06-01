@@ -1,8 +1,8 @@
 # snyk-code-to-csv
 
-Run `snyk code test` and export the results to a CSV that includes the **full
-source-to-sink data flow** (with real code snippets) and the **remediation
-advice** ("how to fix") for every issue.
+Run `snyk code test` and export the results to a **CSV** and/or a **PDF report**
+that includes the **full source-to-sink data flow** (with real code snippets)
+and the **remediation advice** ("how to fix") for every issue.
 
 ## Why SARIF (not `--json` or `snyk-to-html`)
 
@@ -23,13 +23,21 @@ reads the source files from disk to attach the actual code line to each step.
 ## Requirements
 
 - [Snyk CLI](https://docs.snyk.io/snyk-cli) authenticated (`snyk auth`)
-- Python 3 (standard library only — no pip installs)
+- Python 3 — CSV export uses the **standard library only**
+- For PDF export only: `pip3 install reportlab` (pure Python, no system deps).
+  It is imported lazily, so CSV export works without it.
 
 ## Usage
 
 ```bash
 # Scan a project -> snyk-code-results.csv
 ./snyk_code_to_csv.py /path/to/project
+
+# PDF report instead of CSV  -> snyk-code-results.pdf
+./snyk_code_to_csv.py /path/to/project --format pdf
+
+# Both, with a custom base name -> report.csv and report.pdf
+./snyk_code_to_csv.py /path/to/project --format both -o report
 
 # Current directory, custom output
 ./snyk_code_to_csv.py . -o findings.csv
@@ -40,6 +48,18 @@ reads the source files from disk to attach the actual code line to each step.
 # Pass extra flags through to the Snyk CLI (after `--`)
 ./snyk_code_to_csv.py . -- --org=my-org --severity-threshold=medium
 ```
+
+### Output formats
+
+`--format {csv,pdf,both}` (default `csv`). With `-o` you give a path/base name;
+the extension is set automatically per format (so `-o report --format both`
+writes `report.csv` and `report.pdf`).
+
+The **PDF report** has a summary header (project, date, issue counts) followed by
+one section per finding: a severity-coloured title, a metadata table
+(file:line, rule, CWE, priority score, auto-fixable), the message, the full
+numbered source→sink data flow in monospace, and the remediation guidance with
+its headings and bullet lists rendered.
 
 > `--project-root` is the directory the SARIF file paths are relative to. It
 > defaults to the scan target, so you only need it with `--sarif-input`.
