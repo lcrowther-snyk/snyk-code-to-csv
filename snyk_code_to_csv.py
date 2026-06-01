@@ -251,7 +251,7 @@ def summary_text(rows):
     return ", ".join(f"{counts[s]} {s}" for s in ("High", "Medium", "Low") if s in counts)
 
 
-def write_csv(rows, path):
+def write_csv(rows, path, meta=None):
     with open(path, "w", encoding="utf-8", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=CSV_COLUMNS)
         writer.writeheader()
@@ -444,27 +444,176 @@ def write_pdf(rows, path, meta):
     doc.build(story)
 
 
-def resolve_outputs(output_arg, fmt):
-    """Map --output + --format to concrete csv/pdf paths."""
+# --- DOCX export -----------------------------------------------------------
+
+_MD_INLINE = re.compile(r"(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)]+\))")
+
+
+def _docx_add_inline(paragraph, text):
+    """Add a markdown line to a docx paragraph, honouring **bold**, `code`, links."""
+    from docx.shared import RGBColor
+
+    for part in _MD_INLINE.split(text):
+        if not part:
+            continue
+        if part.startswith("**") and part.endswith("**"):
+            paragraph.add_run(part[2:-2]).bold = True
+        elif part.startswith("`") and part.endswith("`"):
+            run = paragraph.add_run(part[1:-1])
+            run.font.name = "Courier New"
+        else:
+            link = re.match(r"\[([^\]]+)\]\(([^)]+)\)", part)
+            if link:
+                run = paragraph.add_run(f"{link.group(1)} ({link.group(2)})")
+                run.font.color.rgb = RGBColor(0x3B, 0x7D, 0xD8)
+            else:
+                paragraph.add_run(part)
+
+
+def _docx_add_markdown(doc, md):
+    """Render the remediation markdown into a docx document."""
+    from docx.shared import Pt
+
+    lines = md.split("\n")
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if line.lstrip().startswith("```"):
+            i += 1
+            while i < len(lines) and not lines[i].lstrip().startswith("```"):
+                p = doc.add_paragraph()
+                run = p.add_run(lines[i])
+                run.font.name = "Courier New"
+                run.font.size = Pt(8)
+                i += 1
+            i += 1
+            continue
+        stripped = line.strip()
+        if not stripped:
+            i += 1
+            continue
+        h = re.match(r"^(#{1,6})\s+(.*)", stripped)
+        if h:
+            doc.add_heading(h.group(2), level=min(len(h.group(1)) + 1, 4))
+            i += 1
+            continue
+        b = re.match(r"^[-*]\s+(.*)", stripped)
+        if b:
+            p = doc.add_paragraph(style="List Bullet")
+            _docx_add_inline(p, b.group(1))
+            i += 1
+            continue
+        p = doc.add_paragraph()
+        _docx_add_inline(p, stripped)
+        i += 1
+
+
+def write_docx(rows, path, meta):
+    try:
+        from docx import Document
+        from docx.shared import Pt, RGBColor
+    except ImportError:
+        raise SystemExit(
+            "DOCX export requires the 'python-docx' package. Install it with:\n"
+            "    pip3 install python-docx"
+        )
+
+    doc = Document()
+    doc.add_heading("Snyk Code Security Report", level=0)
+    intro = doc.add_paragraph()
+    intro.add_run("Project: ").bold = True
+    intro.add_run(meta["project"])
+    intro.add_run("\nGenerated: ").bold = True
+    intro.add_run(meta["date"])
+    intro.add_run("\nTotal issues: ").bold = True
+    intro.add_run(f"{len(rows)} ({summary_text(rows) or 'none'})")
+
+    for idx, r in enumerate(rows, 1):
+        sev = r["severity"]
+        heading = doc.add_heading(level=1)
+        hexcol = SEVERITY_COLORS.get(sev, "#666666")
+        sev_run = heading.add_run(f"[{sev}] ")
+        sev_run.font.color.rgb = RGBColor.from_string(hexcol.lstrip("#"))
+        heading.add_run(f"{idx}. {r['issue_title']}")
+
+        info = [
+            ("File", f'{r["file"]}:{r["line"]}'),
+            ("Rule", r["rule_id"]),
+            ("CWE", r["cwe"] or "-"),
+            ("Priority score", str(r["priority_score"]) or "-"),
+            ("Auto-fixable", str(r["autofixable"]) or "-"),
+        ]
+        table = doc.add_table(rows=0, cols=2)
+        table.style = "Light List Accent 1"
+        for key, val in info:
+            cells = table.add_row().cells
+            cells[0].text = key
+            cells[1].text = val
+            for para in cells[0].paragraphs:
+                for run in para.runs:
+                    run.bold = True
+
+        if r["message"]:
+            doc.add_paragraph(r["message"])
+
+        p = doc.add_paragraph()
+        p.add_run("Data flow (source → sink)").bold = True
+        for fline in (r["data_flow"] or "(no data flow)").split("\n"):
+            cp = doc.add_paragraph()
+            run = cp.add_run(fline)
+            run.font.name = "Courier New"
+            run.font.size = Pt(8)
+
+        if r["remediation"]:
+            p = doc.add_paragraph()
+            p.add_run("Remediation").bold = True
+            _docx_add_markdown(doc, r["remediation"])
+
+    if not rows:
+        doc.add_paragraph("No issues found.")
+
+    doc.save(path)
+
+
+VALID_FORMATS = ("csv", "pdf", "docx")
+FORMAT_ALIASES = {"all": VALID_FORMATS, "both": ("csv", "pdf")}
+
+
+def parse_formats(fmt_arg):
+    """Parse a comma-separated --format value into an ordered list of formats."""
+    out = []
+    for token in fmt_arg.lower().split(","):
+        token = token.strip()
+        if not token:
+            continue
+        for fmt in FORMAT_ALIASES.get(token, (token,)):
+            if fmt not in VALID_FORMATS:
+                raise SystemExit(
+                    f"Unknown format '{fmt}'. Choose from: "
+                    f"{', '.join(VALID_FORMATS)}, all, both (comma-separated)."
+                )
+            if fmt not in out:
+                out.append(fmt)
+    return out or ["csv"]
+
+
+def resolve_outputs(output_arg, formats):
+    """Map --output + parsed formats to concrete {format: path} targets."""
     base = output_arg or "snyk-code-results"
-    base = re.sub(r"\.(csv|pdf)$", "", base, flags=re.IGNORECASE)
-    targets = {}
-    if fmt in ("csv", "both"):
-        targets["csv"] = base + ".csv"
-    if fmt in ("pdf", "both"):
-        targets["pdf"] = base + ".pdf"
-    return targets
+    base = re.sub(r"\.(csv|pdf|docx)$", "", base, flags=re.IGNORECASE)
+    return {fmt: f"{base}.{fmt}" for fmt in formats}
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Export Snyk Code findings (source-to-sink + remediation) to CSV and/or PDF.",
+        description="Export Snyk Code findings (source-to-sink + remediation) to CSV, PDF and/or DOCX.",
         epilog="Pass extra Snyk CLI flags after '--', e.g. -- --org=acme --severity-threshold=high",
     )
     parser.add_argument("target", nargs="?", default=".",
                         help="Path to the project to scan (default: current dir)")
-    parser.add_argument("-f", "--format", choices=("csv", "pdf", "both"), default="csv",
-                        help="Output format(s) to write (default: csv)")
+    parser.add_argument("-f", "--format", default="csv",
+                        help="Output format(s): csv, pdf, docx, all, or a comma-separated "
+                             "list e.g. 'csv,docx' (default: csv)")
     parser.add_argument("-o", "--output",
                         help="Output path/base name (extension is set per format; "
                              "default: snyk-code-results)")
@@ -489,17 +638,16 @@ def main():
 
     reader = SourceReader(project_root)
     rows = sarif_to_rows(sarif, reader, project_root)
-    targets = resolve_outputs(args.output, args.format)
+    targets = resolve_outputs(args.output, parse_formats(args.format))
+
+    meta = {"project": os.path.abspath(project_root),
+            "date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")}
+    writers = {"csv": write_csv, "pdf": write_pdf, "docx": write_docx}
 
     written = []
-    if "csv" in targets:
-        write_csv(rows, targets["csv"])
-        written.append(targets["csv"])
-    if "pdf" in targets:
-        meta = {"project": os.path.abspath(project_root),
-                "date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")}
-        write_pdf(rows, targets["pdf"], meta)
-        written.append(targets["pdf"])
+    for fmt, path in targets.items():
+        writers[fmt](rows, path, meta)
+        written.append(path)
 
     print(f"Wrote {len(rows)} issues ({summary_text(rows) or 'none'}) to "
           f"{', '.join(written)}", file=sys.stderr)
